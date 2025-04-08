@@ -1,7 +1,13 @@
 Changelog
 =========
 
-2.6.0 (unreleased)
+2.7.0 (unreleased)
+------------------
+
+- no changes yet
+
+
+2.6.0 (2025-04-04)
 ------------------
 
 - #47 Update permission imports
