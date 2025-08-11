@@ -51,13 +51,13 @@ class ContainerListingView(FacilityListingView):
 
         self.context_actions = collections.OrderedDict((
             (_("Add container"), {
-                "url": "createObject?type_name=StorageContainer",
+                "url": "++add++StorageContainer",
                 "permission": AddStorageContainer,
                 "icon": "{}/{}".format(
                     self.icon_path, "storage-container"),
             }),
             (_("Add samples container"), {
-                "url": "createObject?type_name=StorageSamplesContainer",
+                "url": "++add++StorageSamplesContainer",
                 "permission": AddStorageSamplesContainer,
                 "icon": "{}/{}".format(
                     self.icon_path, "storage-sample-container")
