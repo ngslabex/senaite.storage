@@ -22,9 +22,12 @@ import collections
 
 from bika.lims import api
 from bika.lims import senaiteMessageFactory as _s
+from plone.memoize.view import memoize
 from senaite.app.listing.view import ListingView
+from senaite.core.api import dtime
 from senaite.core.catalog import SAMPLE_CATALOG
 from senaite.storage import senaiteMessageFactory as _
+from senaite.storage import api as sapi
 from senaite.storage.permissions import TransitionAddSamples
 
 
@@ -74,6 +77,20 @@ class SampleListingView(ListingView):
                 "toggle": True}),
             ("getDateReceived", {
                 "title": _s("Date Received"),
+                "toggle": True}),
+            ("getDateSored", {
+                "title": _(
+                    u"listing_samples_column_date_stored",
+                    default=u"Date stored"
+                ),
+                "index": "getDateStored",
+                "toggle": True}),
+            ("getStorageExpiryDate", {
+                "title": _(
+                    u"listing_samples_column_storage_expiry_date",
+                    default=u"Retain Until"
+                ),
+                "index": "getStorageExpiryDate",
                 "toggle": True}),
             ("Client", {
                 "title": _s("Client"),
@@ -129,6 +146,13 @@ class SampleListingView(ListingView):
         """
         return self.context.plone_utils.addPortalMessage(message, level)
 
+    @memoize
+    def get_warning_days_before_expiration(self):
+        """Returns the number of days before a sample's retention period ends
+        when it should be marked as approaching expiration
+        """
+        return sapi.get_warning_days_before_expiration()
+
     def folderitems(self):
         """We add this function to tell baselisting to use brains instead of
         full objects"""
@@ -139,15 +163,31 @@ class SampleListingView(ListingView):
         """Applies new properties to item that is currently being rendered as a
         row in the list
         """
-        received = obj.getDateReceived
-        sampled = obj.getDateSampled
+        obj = api.get_object(obj)
+        received = obj.getDateReceived()
+        sampled = obj.getDateSampled()
         item["getDateReceived"] = self.ulocalized_time(received, long_format=1)
         item["getDateSampled"] = self.ulocalized_time(sampled, long_format=1)
-        position = self.context.get_object_position(api.get_uid(obj))
+        position = self.context.get_object_position(obj)
         item["position"] = self.context.position_to_alpha(
             position[0], position[1])
         prev_state = api.get_previous_worfklow_status_of(obj, skip=("stored",))
         if prev_state:
             item["PreviousState"] = self.translate_review_state(
                 prev_state, api.get_portal_type(obj))
+
+        # date when the retention period expires
+        column = "getStorageExpiryDate"
+        expiry_date = obj.getStorageExpiryDate()
+        expiry_str = dtime.to_localized_time(expiry_date)
+        item[column] = expiry_str
+
+        # visual indicators if retention expired or approaching expiration
+        warn_days = self.get_warning_days_before_expiration()
+        span = "<span class='font-weight-bold %s'>%s</span>"
+        if sapi.is_retention_expired(obj):
+            item["replace"][column] = span % ("text-danger", expiry_str)
+        elif sapi.is_retention_approaching_expiration(obj, warn_days):
+            item["replace"][column] = span % ("text-warning", expiry_str)
+
         return item

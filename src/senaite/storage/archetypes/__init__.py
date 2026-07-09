@@ -15,11 +15,5 @@
 # this program; if not, write to the Free Software Foundation, Inc., 51
 # Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 #
-# Copyright 2019-2024 by it's authors.
+# Copyright 2019-2026 by it's authors.
 # Some rights reserved, see README and LICENSE.
-
-def after_recover_samples(samples_container):
-    """Retrieves all samples contained in this samples container
-    """
-    for sample in samples_container.get_samples():
-        samples_container.remove_object(sample)

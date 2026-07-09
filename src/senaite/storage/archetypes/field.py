@@ -15,11 +15,28 @@
 # this program; if not, write to the Free Software Foundation, Inc., 51
 # Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 #
-# Copyright 2019-2024 by it's authors.
+# Copyright 2019-2026 by it's authors.
 # Some rights reserved, see README and LICENSE.
 
-def after_recover_samples(samples_container):
-    """Retrieves all samples contained in this samples container
+from archetypes.schemaextender.field import ExtensionField as ATExtensionField
+from Products.Archetypes.atapi import DateTimeField
+from Products.Archetypes.atapi import StringField
+
+
+class ExtensionField(ATExtensionField):
+    """Mix-in class to make Archetypes fields not depend on generated accessors
+    and mutators, and use AnnotationStorage by default
     """
-    for sample in samples_container.get_samples():
-        samples_container.remove_object(sample)
+
+    def __init__(self, *args, **kwargs):
+        super(ExtensionField, self).__init__(*args, **kwargs)
+
+
+class ExtDateTimeField(ExtensionField, DateTimeField):
+    """Field extender of DateTimeField
+    """
+
+
+class ExtStringField(ExtensionField, StringField):
+    """Field extender of StringField
+    """

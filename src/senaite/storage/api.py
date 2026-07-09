@@ -19,8 +19,10 @@
 # Some rights reserved, see README and LICENSE.
 
 from bika.lims import api
+from senaite.core.api import dtime
 from senaite.storage import logger
 from senaite.storage.catalog import STORAGE_CATALOG
+from senaite.storage.config import PRODUCT_NAME
 from senaite.storage.config import STORAGE_WORKFLOW_ID
 
 
@@ -62,6 +64,88 @@ def get_storage_workflow():
     return wf_tool.getWorkflowByd(STORAGE_WORKFLOW_ID)
 
 
+def get_retention_rules():
+    """Return the list of retention period rules from the registry
+
+    Each rule is a dict with keys:
+    - service: UID of the AnalysisService
+    - result: expected result value (empty string means any result)
+    - retention_days: number of days for retention
+    """
+    key = "{}.retention_period_rules".format(PRODUCT_NAME)
+    rules = api.get_registry_record(key, default=None)
+    if not rules:
+        return []
+    return list(rules)
+
+
+def get_default_retention_period(sample):
+    """Return the default retention period (days) for a sample
+
+    Matching logic:
+    1. Get all analyses of the sample
+    2. For each analysis, check rules for matching service UID
+    3. If rule has a result specified, also match by result value
+    4. Specific rules (with result) take priority over general rules
+    5. If multiple rules match, use the longest retention period
+    6. Return None if no rule matches
+    """
+    rules = get_retention_rules()
+    if not rules:
+        return None
+
+    # Group the list of rules by service uid
+    rules_by_uid = {}
+    for rule in rules:
+        service_uid = rule.get("service", "")
+        if not service_uid:
+            continue
+        rules_by_uid.setdefault(service_uid, []).append(rule)
+
+    specific_candidates = []
+    general_candidates = []
+
+    analyses = sample.getAnalyses(full_objects=True)
+    for analysis in analyses:
+        service_uid = analysis.getServiceUID()
+        matching_rules = rules_by_uid.get(service_uid, [])
+        result = analysis.getResult()
+        # Multiselect/multichoice results are stored as JSON arrays.
+        # api.to_list parses JSON strings and wraps scalars in a list,
+        # so we can always use `in` for matching.
+        result_values = api.to_list(result)
+        for rule in matching_rules:
+            rule_result = rule.get("result", "")
+            retention_days = rule.get("retention_days", 0)
+            if rule_result and rule_result in result_values:
+                specific_candidates.append(retention_days)
+            elif not rule_result:
+                general_candidates.append(retention_days)
+
+    if specific_candidates:
+        return max(specific_candidates)
+    elif general_candidates:
+        return max(general_candidates)
+    return None
+
+
+def get_retrieve_reasons():
+    """Return the list of predefined retrieve reasons from the registry
+    """
+    key = "{}.retrieve_reasons".format(PRODUCT_NAME)
+    reasons = api.get_registry_record(key, default=None)
+    if not reasons:
+        return []
+    return list(reasons)
+
+
+def is_retrieve_reason_required():
+    """Return whether selecting a retrieve reason is mandatory
+    """
+    key = "{}.require_retrieve_reason".format(PRODUCT_NAME)
+    return api.get_registry_record(key, default=False)
+
+
 def get_parents(obj, parents=None, predicate=None):
     """Return all parents of the object
     """
@@ -74,3 +158,34 @@ def get_parents(obj, parents=None, predicate=None):
     if predicate(parent):
         return parents
     return get_parents(parent, parents=parents, predicate=predicate)
+
+
+def get_warning_days_before_expiration():
+    """Returns the number of days before a sample's retention period ends
+    when it should be marked as approaching expiration
+    """
+    key = "{}.warning_days_before_expiration".format(PRODUCT_NAME)
+    days =  api.get_registry_record(key)
+    return api.to_int(days, default=5)
+
+
+def is_retention_expired(sample, on_date=None):
+    """Returns whether the storage retention period of this sample is expired
+    on the given date. If the on_date is None, uses current date
+    """
+    expiry_date = sample.getStorageExpiryDate()
+    if not expiry_date:
+        return None
+    if not on_date:
+        on_date = dtime.DateTime()
+    return expiry_date <= on_date
+
+
+def is_retention_approaching_expiration(sample, days=None):
+    """Returns whether the storage retention period of this sample is
+    approaching expiration
+    """
+    if days is None:
+        days = get_warning_days_before_expiration()
+    on_date = dtime.DateTime() + days
+    return is_retention_expired(sample, on_date)

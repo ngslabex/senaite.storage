@@ -21,6 +21,8 @@
   <!-- This governs whether you can get a listing of the contents of a folder; it -->
   <!-- doesn't check whether you have the right to view the objects listed. -->
   <permission>List folder contents</permission>
+  <!-- This governs whether you are allowed to add content to a folder. -->
+  <permission>Add portal content</permission>
 
   <!-- senaite.storage Add permissions -->
   <permission>senaite.storage: Add Storage Facility</permission>
@@ -46,7 +48,13 @@
     <permission-map name="Access contents information" acquired="True" />
     <permission-map name="Delete objects" acquired="True" />
     <permission-map name="List folder contents" acquired="True" />
-    <permission-map name="Modify portal content" acquired="True" />
+    <permission-map name="Modify portal content" acquired="True">
+      <permission-role>StorageManager</permission-role>
+      <permission-role>StorageAssistant</permission-role>
+    </permission-map>
+    <permission-map name="Add portal content" acquired="True">
+      <permission-role>StorageAssistant</permission-role>
+    </permission-map>
     <permission-map name="View" acquired="True" />
     <!-- senaite.storage Add permissions -->
     <permission-map name="senaite.storage: Add Storage Facility" acquired="True" />
@@ -111,11 +119,15 @@
     </guard>
   </transition>
 
-  <!-- Transition: recover_samples -->
-  <transition transition_id="recover_samples" title="Recover samples"
+  <!-- Transition: recover_samples
+       NOTE: The transition ID "recover_samples" is kept for historical
+       reasons. The user-facing term is "retrieve", which aligns with
+       ISO 17025 and ISO 15189 standard terminology for the process of
+       taking samples out of storage. -->
+  <transition transition_id="recover_samples" title="Retrieve samples"
               new_state="" trigger="USER" before_script="" after_script=""
               i18n:attributes="title">
-    <action url="" category="workflow" icon="">Recover samples</action>
+    <action url="" category="workflow" icon="">Retrieve samples</action>
     <guard>
       <guard-permission>senaite.storage: Transition: Recover Samples</guard-permission>
       <guard-expression>python:here.guard_handler("recover_samples")</guard-expression>

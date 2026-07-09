@@ -30,7 +30,6 @@
 
     <!-- Content -->
     <metal:core fill-slot="content-core">
-      <div id="viewlet-senaite-storage-js" tal:content="structure provider:senaite.storage.js" />
       <div id="store-samples-view"
            tal:define="portal context/@@plone_portal_state/portal;
                container python:view.get_container();
@@ -66,6 +65,17 @@
                             tal:attributes="value python: alpha_value"></option>
                   </tal:options>
                 </select>
+              </div>
+            </div>
+
+            <!-- Retention Period -->
+            <div class="mr-2">
+              <div class="input-group input-group-sm">
+                <div class="input-group-prepend">
+                  <div i18n:translate="" class="input-group-text">Retention (days)</div>
+                </div>
+                <input type="number" name="retention_period" id="retention_period"
+                       class="form-control" min="0" style="max-width:100px;"/>
               </div>
             </div>
 
@@ -141,7 +151,7 @@
                         </div>
                       </td>
                       <td tal:condition="python: item and True or False"
-                          class="non-empty-slot">
+                          tal:attributes="class python: info.get('css','non-empty-slot')">
                         <!-- sample title -->
                         <a href="#"
                            tal:attributes="href info/url">

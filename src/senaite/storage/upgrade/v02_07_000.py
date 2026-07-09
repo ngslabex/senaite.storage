@@ -18,19 +18,28 @@
 # Copyright 2019-2024 by it's authors.
 # Some rights reserved, see README and LICENSE.
 
-from bika.lims.utils import tmpID
 from bika.lims import api
+from bika.lims.utils import tmpID
 from plone.dexterity.fti import DexterityFTI
 from plone.dexterity.utils import createContent
+from senaite.core.api import workflow as wapi
 from senaite.core.interfaces import IContentMigrator
 from senaite.core.schema.addressfield import PHYSICAL_ADDRESS
+from senaite.core.setuphandlers import add_catalog_index
 from senaite.core.upgrade import upgradestep
 from senaite.core.upgrade.utils import UpgradeUtils
-from senaite.storage import PRODUCT_NAME
+from senaite.core.workflow import SAMPLE_WORKFLOW
 from senaite.storage import logger
+from senaite.storage import PRODUCT_NAME
 from senaite.storage.catalog import STORAGE_CATALOG
+from senaite.storage.config import STORAGE_WORKFLOW_ID
 from senaite.storage.setuphandlers import display_in_nav
+from senaite.storage.setuphandlers import setup_roles
+from senaite.storage.setuphandlers import setup_user_groups
+from senaite.storage.setuphandlers import setup_workflows
 from zope.component import getMultiAdapter
+from senaite.core.catalog import SAMPLE_CATALOG
+import transaction
 
 version = "2.7.0"
 profile = "profile-{0}:default".format(PRODUCT_NAME)
@@ -136,6 +145,8 @@ def migrate_storage_facility_to_dx(src, destination):
 
     address = dict(src.getAddress())
     address["type"] = PHYSICAL_ADDRESS
+    for key in list(address.keys()):
+        address[key] = api.safe_unicode(address.get(key, u""))
     target.setAddress(address)
 
     cb = src.manage_copyObjects(ids=src.objectIds())
@@ -425,3 +436,169 @@ def display_storage_navbar(tool):
     portal = api.get_portal()
     display_in_nav(portal.senaite_storage)
     logger.info("Display storage in navigation bar [DONE]")
+
+
+@upgradestep(PRODUCT_NAME, version)
+def setup_storage_roles_and_groups(tool):
+    """Set up storage-specific roles and user groups.
+
+    We add the @upgradestep decorator because we reapply storage-specific
+    workflow changes in `setuphandlers.update_workflow`, which may otherwise
+    overwrite workflow customizations introduced by more specific add-ons.
+    Using this decorator ensures that upgrade subscribers from other add-ons
+    are executed afterwards.
+    """
+    logger.info("Setup storage-specific roles and groups ...")
+
+    portal = tool.aq_inner.aq_parent
+    setup = portal.portal_setup  # noqa
+
+    # import rolemap and workflow definitions
+    setup.runImportStepFromProfile(profile, "rolemap")
+    setup.runImportStepFromProfile(profile, "workflow")
+
+    # setup roles permissions for portal
+    setup_roles(portal)
+
+    # setup user groups
+    setup_user_groups(portal)
+
+    # setup workflows
+    setup_workflows(portal)
+
+    # catalog indexes to reindex after updating role mappings
+    idxs = ["allowedRolesAndUsers"]
+
+    # update role mappings for storage's root folder
+    storage_folder = portal.senaite_storage
+    workflow = wapi.get_workflow("senaite_storage_folder_workflow")
+    workflow.updateRoleMappingsFor(storage_folder)
+    storage_folder.reindexObject(idxs=idxs)
+
+    # update role mappings for storage-specific objects
+    logger.info("Updating role mappings of storage objects ...")
+    workflow = wapi.get_workflow(STORAGE_WORKFLOW_ID)
+    cat = api.get_tool(STORAGE_CATALOG)
+    brains = cat()
+    total = len(brains)
+    for num, brain in enumerate(brains):
+        if num and num % 100 == 0:
+            logger.info("Updating role mappings of storage objects {0}/{1}"
+                        .format(num, total))
+            transaction.savepoint(optimistic=True)
+
+        ob = api.get_object(brain)
+        workflow.updateRoleMappingsFor(ob)
+        cat.catalog_object(ob, idxs=idxs, update_metadata=0)
+        ob._p_deactivate()  # noqa
+
+    # update role mappings for samples in 'stored' status
+    logger.info("Updating role mappings of samples ...")
+    workflow = wapi.get_workflow(SAMPLE_WORKFLOW)
+    cat = api.get_tool(SAMPLE_CATALOG)
+    brains = cat(review_state="stored")
+    total = len(brains)
+    for num, brain in enumerate(brains):
+        if num and num % 100 == 0:
+            logger.info("Updating role mappings of samples {0}/{1}"
+                        .format(num, total))
+            transaction.savepoint(optimistic=True)
+
+        if num and num % 1000 == 0:
+            # Updating role mappings on samples can exhaust all available RAM,
+            # even if objects are explicitly deactivated. This happens because
+            # DCWorkflow's updateRoleMappings wakes up objects across the
+            # entire hierarchy in order to resolve inherited permissions via
+            # acquisition. Therefore, we deactivate here all unmodified objects
+            # from the cache of the current database connection
+            logger.info("Flushing deactivated objects from cache ...")
+            portal._p_jar.cacheMinimize()  # noqa
+
+        ob = api.get_object(brain)
+        workflow.updateRoleMappingsFor(ob)
+        cat.catalog_object(ob, idxs=idxs, update_metadata=0)
+        ob._p_deactivate()  # noqa
+
+    logger.info("Setup storage-specific roles and groups [DONE]")
+
+
+def setup_retention_period_rules(tool):
+    """Register retention period rules field in the registry
+    """
+    logger.info("Setup retention period rules ...")
+
+    portal = tool.aq_inner.aq_parent
+    setup = portal.portal_setup  # noqa
+    setup.runImportStepFromProfile(profile, "plone.app.registry")
+
+    logger.info("Setup retention period rules [DONE]")
+
+
+def setup_past_retention_filter(tool):
+    """Adds a DateIndex in samples catalog ('getStorageExpiryDate') to allow
+    date range searches by retention period expiry date
+    """
+    logger.info("Setup past retention filter ...")
+    portal = tool.aq_inner.aq_parent
+
+    # Add the index (without reindex)
+    cat = api.get_tool(SAMPLE_CATALOG)
+    idx_id = "getStorageExpiryDate"
+    add_catalog_index(cat, idx_id, "", "DateIndex")
+
+    # reindex this index only for samples in stored status
+    brains = cat(review_state="stored")
+    total = len(brains)
+    for num, brain in enumerate(brains):
+        if num and num % 100 == 0:
+            logger.info("Processed objects: {0}/{1}".format(num, total))
+            transaction.savepoint()
+
+        obj = api.get_object(brain)
+        obj.reindexObject(idxs=[idx_id])
+        obj._p_deactivate()
+
+    logger.info("Setup past retention filter [DONE]")
+
+
+def setup_days_before_expiration(tool):
+    """Add 'Days before expiration' setting in control panel
+    """
+    logger.info("Setup days before expiration ...")
+
+    portal = tool.aq_inner.aq_parent
+    setup = portal.portal_setup  # noqa
+    setup.runImportStepFromProfile(profile, "plone.app.registry")
+
+    logger.info("Setup days before expiration [DONE]")
+
+
+def setup_retrieve_reasons(tool):
+    """Register retrieve reason fields in the registry
+    """
+    logger.info("Setup retrieve reasons ...")
+
+    portal = tool.aq_inner.aq_parent
+    setup = portal.portal_setup  # noqa
+    setup.runImportStepFromProfile(profile, "plone.app.registry")
+
+    logger.info("Setup retrieve reasons [DONE]")
+
+
+def rename_recover_to_retrieve(tool):
+    """Renames the user-facing term 'recover' to 'retrieve', which aligns with
+    ISO 17025 and ISO 15189 standard terminology for the process of taking
+    samples out of storage. Internal transition IDs and permission strings
+    remain unchanged for backwards compatibility.
+    """
+    logger.info("Recover --> Retrieve ...")
+    portal = tool.aq_inner.aq_parent
+
+    # Update the sample workflow (transition title/action)
+    setup_workflows(portal)
+
+    # Re-import the storage workflow definition (transition title/action)
+    setup = portal.portal_setup
+    setup.runImportStepFromProfile(profile, "workflow")
+
+    logger.info("Recover --> Retrieve [DONE]")

@@ -4,6 +4,15 @@ Changelog
 2.7.0 (unreleased)
 ------------------
 
+- #71 Fix UnicodeDecodeError when running migrate_storage_facility_to_dx
+- #68 Require selection of retrieve reason when retrieving samples from storage
+- #67 Rename "Recover" transtion to "Retrieve" to align with ISO 17025/15189
+- #66 Add visual warning for samples approaching retention expiration
+- #65 Add a "Past Retention" filter in samples listing
+- #63 Result type-specific controls in retention rules settings
+- #64 Add 'Storage Expiry Date' column in samples listing, under 'Stored'
+- #62 Add configurable storage retention period
+- #61 Added StorageManager and StorageAssistant roles and counterpart groups
 - #60 Fix sample search when assigning received samples to storage container
 - #59 Fix AttributeError when migrating facilities to DX (2701)
 - #58 Fix ValueError: undefined property 'add_permission' on upgrade
